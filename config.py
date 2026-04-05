@@ -1,3 +1,4 @@
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,10 +9,15 @@ XML_DIR = Path(__file__).parent / "xml"
 XLSX_FILE = Path(__file__).parent / "responses.xlsx"
 
 
+class AggregationType(Enum):
+    RESPONDENTS = "respondents"
+    QUESTIONS = "questions"
+
+
 class DatabaseSettings(BaseModel):
     type: str = "postgresql"
     driver: str = "psycopg"
-    host: str = "postgres"
+    host: str = "localhost"
     port: str = "5432"
     username: str = "postgres"
     password: str = "password"
@@ -32,7 +38,8 @@ class XLSXSettings(BaseModel):
 
 
 class OutputSettings(BaseModel):
-    folder: Path = Path(__file__).parent / "output"
+    questions_folder: Path = Path(__file__).parent / "output" / "questions"
+    respondents_folder: Path = Path(__file__).parent / "output" / "respondents"
 
 
 class Settings(BaseSettings):
