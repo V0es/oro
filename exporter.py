@@ -41,11 +41,10 @@ def fetch_surveys_data(session: Session) -> Iterable[Survey]:
 
 
 def respondent_transform(surveys: Iterable[Survey]) -> dict:
-    """Конвертация строк БД во вложенные словари
-    survey -> respondent -> question -> option
+    """Трансформация ORM объектов в словарь с аггрерацией по респондентам
 
     Args:
-        rows (Iterable[Row]): Строки БД
+        surveys (Iterable[Survey]): Объекты опросов
 
     Returns:
         dict: Итоговый объект
@@ -93,6 +92,15 @@ def respondent_transform(surveys: Iterable[Survey]) -> dict:
 
 
 def question_transform(surveys: Iterable[Survey]) -> dict:
+    """
+    Трансформация ORM объектов в словарь с аггрерацией по вопросам
+
+    Args:
+        surveys (Iterable[Survey]): Объекты опросов
+
+    Returns:
+        dict: Итоговый объект
+    """
     result = {}
 
     for survey in surveys:
@@ -151,7 +159,8 @@ def save_data_to_json(survey_data: dict, agg_type: AggregationType):
     """Сохраниение выходных данных в json файлы
 
     Args:
-        surveys (dict): Аггрегированные объекты опросов
+        survey_data (dict): Аггрегированный объект опросов
+        agg_type (AggregationType): Тип аггрегации (по респондентам или по вопросам)
     """
     folder_path = (
         settings.output.respondents_folder
