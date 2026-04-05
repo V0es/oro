@@ -1,13 +1,16 @@
 import uuid
 from enum import Enum
+
 from sqlalchemy import (
-    String,
-    ForeignKey,
     Enum as SqlEnum,
+)
+from sqlalchemy import (
+    ForeignKey,
     Integer,
+    String,
     Text,
-    Uuid,
     UniqueConstraint,
+    Uuid,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -101,23 +104,3 @@ class Response(Base):
     )
 
     __table_args__ = (UniqueConstraint("respondent_id", "question_id", "option_id"),)
-
-
-# SELECT
-# 	surv.id as survey_id,
-#     respondents.id as respondent_id,
-#     q.name as question_name,
-#     q.text as question_text,
-#     q.type as question_type,
-#     resp.order as response_order,
-#     resp.text as response_text,
-#     opt.code as opt_code,
-#     opt.text as opt_text
-
-# FROM surveys surv
-# JOIN questions q ON q.survey_id = surv.id
-# JOIN respondents ON respondents.survey_id = surv.id
-# JOIN options opt ON opt.question_id = q.id
-# LEFT JOIN responses resp ON resp.question_id = q.id AND resp.respondent_id = respondents.id AND resp.option_id = opt.id
-# WHERE resp.order IS NOT NULL OR resp.text IS NOT NULL
-# ORDER BY surv.id, respondents.id, q.name, resp.order LIMIT 100
