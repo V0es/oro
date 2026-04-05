@@ -1,6 +1,11 @@
-from config import get_settings
+from config import AggregationType, get_settings
 from database import get_session
-from exporter import convert_data_to_dict, fetch_survey_data, save_jsons
+from exporter import (
+    fetch_surveys_data,
+    question_transform,
+    respondent_transform,
+    save_data_to_json,
+)
 from loader import load_data_to_db
 
 settings = get_settings()
@@ -11,10 +16,13 @@ def main():
     with get_session() as session:
         load_data_to_db(session=session)
 
-        data_rows = fetch_survey_data(session=session)
-        data_object = convert_data_to_dict(rows=data_rows)
+        surveys = fetch_surveys_data(session=session)
 
-        save_jsons(data_object)
+        respondent_aggregation = respondent_transform(surveys)
+        question_aggregation = question_transform(surveys)
+
+    save_data_to_json(respondent_aggregation, AggregationType.RESPONDENTS)
+    save_data_to_json(question_aggregation, AggregationType.QUESTIONS)
 
 
 if __name__ == "__main__":
