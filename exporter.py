@@ -2,54 +2,45 @@ import json
 from collections import defaultdict
 from typing import Iterable
 
-from sqlalchemy import Row, select
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
-from config import get_settings
-from models import Option, Question, QuestionType, Respondent, Response, Survey
+from config import AggregationType, get_settings
+from models import QuestionType, Respondent, Response, Survey
 
 settings = get_settings()
 
 
-def fetch_survey_data(session: Session) -> Iterable[Row]:
+def fetch_surveys_data(session: Session) -> Iterable[Survey]:
     """Получение данных из базы
 
     Args:
         session (Session): Объект сессии
 
     Returns:
-        Iterable[Row]: Коллекция строк БД
+        Iterable[Survey]: Объекты опросов с присоединёнными данными
     """
     stmt = (
-        select(
-            Survey.id.label("survey_id"),
-            Respondent.id.label("respondent_id"),
-            Question.name.label("question_name"),
-            Question.text.label("question_text"),
-            Question.type.label("question_type"),
-            Option.code.label("option_code"),
-            Option.text.label("option_text"),
-            Response.text.label("response_text"),
-            Response.order.label("response_order"),
+        select(Survey)
+        .options(
+            selectinload(Survey.respondents)
+            .selectinload(Respondent.responses)
+            .joinedload(Response.question),
+            selectinload(Survey.respondents)
+            .selectinload(Respondent.responses)
+            .joinedload(Response.option),
+            selectinload(Survey.respondents)
+            .selectinload(Respondent.responses)
+            .joinedload(Response.respondent),
         )
-        .select_from(Response)
-        .join(Respondent, Respondent.id == Response.respondent_id)
-        .join(Survey, Survey.id == Respondent.survey_id)
-        .join(Question, Question.id == Response.question_id)
-        .outerjoin(Option, Option.id == Response.option_id)
-        .order_by(
-            Survey.id,
-            Respondent.id,
-            Question.name,
-            Response.order.nulls_last(),
-        )
+        .order_by(Survey.id)
     )
 
-    result = session.execute(stmt).all()
+    result = session.execute(stmt).scalars().all()
     return result
 
 
-def convert_data_to_dict(rows: Iterable[Row]) -> dict:
+def respondent_transform(surveys: Iterable[Survey]) -> dict:
     """Конвертация строк БД во вложенные словари
     survey -> respondent -> question -> option
 
@@ -59,57 +50,117 @@ def convert_data_to_dict(rows: Iterable[Row]) -> dict:
     Returns:
         dict: Итоговый объект
     """
+
     result = {}
-
-    grouped = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-
-    for row in rows:
-        grouped[row.survey_id][str(row.respondent_id)][row.question_name].append(row)
-
-    for survey_id, respondents in grouped.items():
+    for survey in surveys:
         survey_data = {}
-
-        for respondent_id, questions in respondents.items():
+        for respondent in survey.respondents:
             respondent_data = {}
+            responses_agg = defaultdict(list)
 
-            for question_name, rows in questions.items():
-                first = rows[0]
+            for response in respondent.responses:
+                responses_agg[response.question.name].append(response)
 
-                qusetion_data = {
-                    "type": first.question_type.name,
-                    "text": first.question_text,
-                }
+            for response_group in responses_agg.values():
+                question = response_group[0].question
+                question_data = {}
+                question_data["type"] = question.type.name
+                question_data["text"] = question.text
+                if question.type == QuestionType.TEXT:
+                    question_data["answer"] = response_group[0].text
 
-                if first.question_type == QuestionType.TEXT:
-                    qusetion_data["answer"] = first.response_text
-
-                elif first.question_type == QuestionType.SINGLE:
-                    qusetion_data["answer"] = {
-                        "code": first.option_code,
-                        "text": first.option_text,
+                elif question.type == QuestionType.SINGLE:
+                    question_data["answer"] = {
+                        "code": response_group[0].option.code,
+                        "label": response_group[0].option.text,
                     }
 
-                else:
-                    qusetion_data["answer"] = [
+                elif question.type == QuestionType.MULTIPLE:
+                    question_data["answer"] = [
                         {
-                            "code": row.option_code,
-                            "text": row.option_text,
-                            "order": row.response_order,
+                            "code": response.option.code,
+                            "label": response.option.text,
+                            "order": response.order,
                         }
-                        for row in rows
+                        for response in sorted(response_group, key=lambda r: r.order)
                     ]
-                respondent_data[question_name] = qusetion_data
-            survey_data[respondent_id] = respondent_data
-        result[survey_id] = survey_data
+
+                respondent_data[question.name] = question_data
+
+            survey_data[str(respondent.id)] = respondent_data
+        result[str(survey.id)] = survey_data
     return result
 
 
-def save_jsons(surveys: dict):
+def question_transform(surveys: Iterable[Survey]) -> dict:
+    result = {}
+
+    for survey in surveys:
+        survey_data = {}
+
+        questions_map = defaultdict(list)
+
+        for respondent in survey.respondents:
+            for response in respondent.responses:
+                questions_map[response.question].append(response)
+
+        for question, responses in questions_map.items():
+            responses_agg = defaultdict(list)
+
+            for r in responses:
+                responses_agg[r.respondent_id].append(r)
+
+            respondent_data = {}
+
+            for response_group in responses_agg.values():
+                r0 = response_group[0]
+
+                if question.type == QuestionType.TEXT:
+                    answer = r0.text
+
+                elif question.type == QuestionType.SINGLE:
+                    answer = {
+                        "code": r0.option.code,
+                        "label": r0.option.text,
+                    }
+
+                else:
+                    answer = [
+                        {
+                            "code": r.option.code,
+                            "label": r.option.text,
+                            "order": r.order,
+                        }
+                        for r in sorted(response_group, key=lambda x: x.order)
+                    ]
+
+                respondent_data[str(r0.respondent.id)] = answer
+
+            survey_data[question.name] = {
+                "type": question.type.name,
+                "text": question.text,
+                "respondents": respondent_data,
+            }
+
+        result[str(survey.id)] = survey_data
+
+    return result
+
+
+def save_data_to_json(survey_data: dict, agg_type: AggregationType):
     """Сохраниение выходных данных в json файлы
 
     Args:
         surveys (dict): Аггрегированные объекты опросов
     """
-    for survey_id, respondent_data in surveys.items():
-        with open(settings.output.folder / f"{survey_id}_respondents.json", "w") as f:
-            json.dump(respondent_data, f, indent=4, ensure_ascii=False)
+    folder_path = (
+        settings.output.respondents_folder
+        if agg_type == AggregationType.RESPONDENTS
+        else settings.output.questions_folder
+    )
+    for survey_id, data in survey_data.items():
+        with open(
+            folder_path / f"{survey_id}_{agg_type.value}.json",
+            "w",
+        ) as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
